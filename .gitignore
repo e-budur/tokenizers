@@ -1,6 +1,7 @@
 .DS_Store
 *~
 
+.vim
 .env
 target
 
@@ -8,7 +9,9 @@ Cargo.lock
 
 /data
 tokenizers/data
-/docs
+bindings/python/tests/data
+docs/build/
+docs/make.bat
 
 __pycache__
 pip-wheel-metadata
@@ -18,4 +21,4 @@ pip-wheel-metadata
 /bindings/python/dist
 
 .vscode
-scripts
+*.code-workspace
