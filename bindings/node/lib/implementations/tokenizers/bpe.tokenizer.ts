@@ -5,12 +5,12 @@ import { BPE, BPEOptions, Model } from "../../bindings/models";
 import {
   lowercaseNormalizer,
   nfkcNormalizer,
-  sequenceNormalizer
+  sequenceNormalizer,
 } from "../../bindings/normalizers";
 import { whitespaceSplitPreTokenizer } from "../../bindings/pre-tokenizers";
 import { Tokenizer } from "../../bindings/tokenizer";
 import { bpeTrainer } from "../../bindings/trainers";
-import { BaseTokenizer } from "./base.tokenizer";
+import { BaseTokenizer, getTokenContent, Token } from "./base.tokenizer";
 
 export interface BPETokenizerOptions {
   /**
@@ -30,7 +30,7 @@ export interface BPETokenizerOptions {
    * The unknown token to be used by the model
    * @default "<unk>"
    */
-  unkToken?: string;
+  unkToken?: Token;
   vocabFile?: string;
 }
 
@@ -54,7 +54,7 @@ export interface BPETokenizerTrainOptions {
   /**
    * @default ["<unk>"]
    */
-  specialTokens?: string[];
+  specialTokens?: Token[];
   /**
    * @default "</w>"
    */
@@ -75,7 +75,7 @@ type BPETokenizerConfig = BPETokenizerOptions &
 export class BPETokenizer extends BaseTokenizer<BPETokenizerConfig> {
   private static readonly defaultBPEOptions: BPETokenizerConfig = {
     suffix: "</w>",
-    unkToken: "<unk>"
+    unkToken: "<unk>",
   };
 
   private readonly defaultTrainOptions: Required<BPETokenizerTrainOptions> = {
@@ -85,7 +85,7 @@ export class BPETokenizer extends BaseTokenizer<BPETokenizerConfig> {
     showProgress: true,
     specialTokens: ["<unk>"],
     suffix: "</w>",
-    vocabSize: 30000
+    vocabSize: 30000,
   };
 
   private constructor(tokenizer: Tokenizer, configuration: BPETokenizerConfig) {
@@ -98,23 +98,24 @@ export class BPETokenizer extends BaseTokenizer<BPETokenizerConfig> {
    */
   static async fromOptions(options?: BPETokenizerOptions): Promise<BPETokenizer> {
     const opts = { ...this.defaultBPEOptions, ...options };
+    const unkToken = getTokenContent(opts.unkToken);
 
     let model: Model;
     if (opts.vocabFile && opts.mergesFile) {
       const modelOptions: BPEOptions = {
         dropout: opts.dropout,
         endOfWordSuffix: opts.suffix,
-        unkToken: opts.unkToken
+        unkToken: unkToken,
       };
 
-      const fromFiles = promisify<string, string, BPEOptions, Model>(BPE.fromFiles);
-      model = await fromFiles(opts.vocabFile, opts.mergesFile, modelOptions);
+      const fromFile = promisify<string, string, BPEOptions, Model>(BPE.fromFile);
+      model = await fromFile(opts.vocabFile, opts.mergesFile, modelOptions);
     } else {
       model = BPE.empty();
     }
 
     const tokenizer = new Tokenizer(model);
-    if (tokenizer.tokenToId(opts.unkToken) !== undefined) {
+    if (tokenizer.tokenToId(unkToken) !== undefined) {
       tokenizer.addSpecialTokens([opts.unkToken]);
     }
 

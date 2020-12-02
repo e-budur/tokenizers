@@ -1,5 +1,3 @@
-import { mocked } from "ts-jest/utils";
-
 import { BertWordPieceOptions, BertWordPieceTokenizer } from "./bert-wordpiece.tokenizer";
 
 const MOCKS_DIR = __dirname + "/__mocks__";
@@ -14,7 +12,7 @@ describe("BertWordPieceTokenizer", () => {
     describe("when a vocabFile is provided and `addSpecialTokens === true`", () => {
       it("throws a `sepToken error` if no `sepToken` is provided", async () => {
         const options: BertWordPieceOptions = {
-          vocabFile: MOCKS_DIR + "/bert-vocab-empty.txt"
+          vocabFile: MOCKS_DIR + "/bert-vocab-empty.txt",
         };
 
         await expect(BertWordPieceTokenizer.fromOptions(options)).rejects.toThrow(
@@ -24,7 +22,7 @@ describe("BertWordPieceTokenizer", () => {
 
       it("throws a `clsToken error` if no `clsToken` is provided", async () => {
         const options: BertWordPieceOptions = {
-          vocabFile: MOCKS_DIR + "/bert-vocab-without-cls.txt"
+          vocabFile: MOCKS_DIR + "/bert-vocab-without-cls.txt",
         };
 
         await expect(BertWordPieceTokenizer.fromOptions(options)).rejects.toThrow(

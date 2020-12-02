@@ -6,7 +6,7 @@ import { nfkcNormalizer } from "../../bindings/normalizers";
 import { metaspacePreTokenizer } from "../../bindings/pre-tokenizers";
 import { Tokenizer } from "../../bindings/tokenizer";
 import { bpeTrainer } from "../../bindings/trainers";
-import { BaseTokenizer } from "./base.tokenizer";
+import { BaseTokenizer, getTokenContent, Token } from "./base.tokenizer";
 
 export interface SentencePieceBPETokenizerOptions extends OptionsWithDefaults {
   dropout?: number;
@@ -26,7 +26,7 @@ interface OptionsWithDefaults {
   /**
    * @default "<unk>"
    */
-  unkToken?: string;
+  unkToken?: Token;
 }
 
 export interface SentencePieceBPETrainOptions {
@@ -49,7 +49,7 @@ export interface SentencePieceBPETrainOptions {
   /**
    * @default ["<unk>"]
    */
-  specialTokens?: string[];
+  specialTokens?: Token[];
   /**
    * @default 30000
    */
@@ -68,7 +68,7 @@ export class SentencePieceBPETokenizer extends BaseTokenizer<
   private static readonly defaultOptions: SentencePieceBPETokenizerConfig = {
     addPrefixSpace: true,
     replacement: "▁",
-    unkToken: "<unk>"
+    unkToken: "<unk>",
   };
 
   private readonly defaultTrainOptions: Required<SentencePieceBPETrainOptions> = {
@@ -77,7 +77,7 @@ export class SentencePieceBPETokenizer extends BaseTokenizer<
     minFrequency: 2,
     showProgress: true,
     specialTokens: ["<unk>"],
-    vocabSize: 30000
+    vocabSize: 30000,
   };
 
   private constructor(
@@ -91,22 +91,23 @@ export class SentencePieceBPETokenizer extends BaseTokenizer<
     options?: SentencePieceBPETokenizerOptions
   ): Promise<SentencePieceBPETokenizer> {
     const opts = { ...this.defaultOptions, ...options };
+    const unkToken = getTokenContent(opts.unkToken);
 
     let model: Model;
     if (opts.vocabFile && opts.mergesFile) {
       const modelOptions: BPEOptions = {
         dropout: opts.dropout,
-        unkToken: opts.unkToken
+        unkToken: unkToken,
       };
 
-      const fromFiles = promisify<string, string, BPEOptions, Model>(BPE.fromFiles);
-      model = await fromFiles(opts.vocabFile, opts.mergesFile, modelOptions);
+      const fromFile = promisify<string, string, BPEOptions, Model>(BPE.fromFile);
+      model = await fromFile(opts.vocabFile, opts.mergesFile, modelOptions);
     } else {
       model = BPE.empty();
     }
 
     const tokenizer = new Tokenizer(model);
-    if (tokenizer.tokenToId(opts.unkToken) !== undefined) {
+    if (tokenizer.tokenToId(unkToken) !== undefined) {
       tokenizer.addSpecialTokens([opts.unkToken]);
     }
 

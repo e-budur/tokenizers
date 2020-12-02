@@ -1,14 +1,22 @@
 import { promisify } from "util";
 
+import { PostProcessor } from "../../bindings/post-processors";
 import {
+  AddedToken,
+  EncodeInput,
+  EncodeOptions,
+  InputSequence,
   PaddingConfiguration,
   PaddingOptions,
   Tokenizer,
   TruncationConfiguration,
-  TruncationOptions
+  TruncationOptions,
 } from "../../bindings/tokenizer";
 import { Encoding } from "../encoding";
 
+export type Token = string | AddedToken;
+
+// eslint-disable-next-line @typescript-eslint/ban-types
 export class BaseTokenizer<TConfig extends object> {
   private _truncation?: TruncationConfiguration;
   private _padding?: PaddingConfiguration;
@@ -20,6 +28,18 @@ export class BaseTokenizer<TConfig extends object> {
      */
     readonly configuration: Readonly<TConfig>
   ) {}
+
+  /**
+   * Instantiate a new Tokenizer from the given file
+   * @param path Path to a file containing a Tokenizer
+   */
+  static fromFile = Tokenizer.fromFile;
+
+  /**
+   * Instantiate a new Tokenizer from the given JSON string
+   * @param s A JSON string representation of the Tokenizer
+   */
+  static fromString = Tokenizer.fromString;
 
   /**
    * Truncation configuration if enabled, `null` otherwise.
@@ -47,12 +67,9 @@ export class BaseTokenizer<TConfig extends object> {
    * Add the given tokens to the vocabulary
    *
    * @param tokens A list of tokens to add to the vocabulary.
-   * Each token can either be a string, or a tuple with a string representing the token,
-   * and a boolean option representing whether to match on single words only.
-   * If the boolean is not included, it defaults to False
-   * @returns The number of tokens that were added to the vocabulary
+   * Each token can either be a string, or an instance of AddedToken.
    */
-  addTokens(tokens: (string | [string, boolean])[]): number {
+  addTokens(tokens: Token[]): number {
     return this.tokenizer.addTokens(tokens);
   }
 
@@ -60,10 +77,11 @@ export class BaseTokenizer<TConfig extends object> {
    * Add the given special tokens to the vocabulary, and treat them as special tokens.
    * The special tokens will never be processed by the model, and will be removed while decoding.
    *
-   * @param tokens The list of special tokens to add
+   * @param tokens The list of special tokens to add.
+   * Each token can either be a string, or an instance of AddedToken
    * @returns The number of tokens that were added to the vocabulary
    */
-  addSpecialTokens(tokens: string[]): number {
+  addSpecialTokens(tokens: Token[]): number {
     return this.tokenizer.addSpecialTokens(tokens);
   }
 
@@ -72,15 +90,15 @@ export class BaseTokenizer<TConfig extends object> {
    *
    * @param sequence The sequence to encode
    * @param [pair] The optional pair sequence
-   * @param [addSpecialTokens=true] Whether to add the special tokens while encoding
+   * @param [options] Some options to customize the encoding
    */
   async encode(
-    sequence: string,
-    pair?: string,
-    addSpecialTokens = true
+    sequence: InputSequence,
+    pair?: InputSequence,
+    options?: EncodeOptions
   ): Promise<Encoding> {
     const encode = promisify(this.tokenizer.encode.bind(this.tokenizer));
-    const rawEncoding = await encode(sequence, pair ?? null, addSpecialTokens);
+    const rawEncoding = await encode(sequence, pair ?? null, options ?? null);
     return new Encoding(rawEncoding);
   }
 
@@ -89,15 +107,15 @@ export class BaseTokenizer<TConfig extends object> {
    *
    * @param sequences A list of sequences or pair of sequences.
    * The list can contain both at the same time.
-   * @param [addSpecialTokens=true] Whether to add the special tokens while encoding
+   * @param [options] Sope options to customize the encoding
    */
   async encodeBatch(
-    sequences: (string | [string, string])[],
-    addSpecialTokens = true
+    sequences: EncodeInput[],
+    options?: EncodeOptions
   ): Promise<Encoding[]> {
     const encodeBatch = promisify(this.tokenizer.encodeBatch.bind(this.tokenizer));
-    const rawEncodings = await encodeBatch(sequences, addSpecialTokens);
-    return rawEncodings.map(e => new Encoding(e));
+    const rawEncodings = await encodeBatch(sequences, options);
+    return rawEncodings.map((e) => new Encoding(e));
   }
 
   /**
@@ -120,16 +138,6 @@ export class BaseTokenizer<TConfig extends object> {
   decodeBatch(ids: number[][], skipSpecialTokens = true): Promise<string[]> {
     const decodeBatch = promisify(this.tokenizer.decodeBatch.bind(this.tokenizer));
     return decodeBatch(ids, skipSpecialTokens);
-  }
-
-  /**
-   * Normalize the given sequence
-   * @param text The sequence to normalize
-   * @returns The normalized string
-   * @since 0.6.0
-   */
-  normalize(text: string): string {
-    return this.tokenizer.normalize(text);
   }
 
   /**
@@ -192,4 +200,60 @@ export class BaseTokenizer<TConfig extends object> {
   tokenToId(token: string): number | undefined {
     return this.tokenizer.tokenToId(token);
   }
+
+  /**
+   * Apply all the post-processing steps to the given encodings.
+   * The various steps are:
+   * 1. Truncate according to global params (@see setTruncation)
+   * 2. Apply the PostProcessor
+   * 3. Pad according to global params (@see setPadding)
+   * @param encoding The main Encoding to post process
+   * @param [pair] An optional pair Encoding
+   * @param [addSpecialTokens=true] Whether to add special tokens. Default to `true`.
+   * @since 0.6.0
+   */
+  postProcess(encoding: Encoding, pair?: Encoding, addSpecialTokens?: boolean): Encoding {
+    const rawEncoding = this.tokenizer.postProcess(
+      encoding.rawEncoding,
+      pair?.rawEncoding,
+      addSpecialTokens
+    );
+
+    return new Encoding(rawEncoding);
+  }
+
+  /**
+   * Change the post-processor to use with this Tokenizer
+   * @param postProcessor New post-processor to use
+   * @throws Will throw an error if any task is running
+   * @throws Will throw an error if the post-processor is already used in another Tokenizer
+   */
+  setPostProcessor(processor: PostProcessor): void {
+    return this.tokenizer.setPostProcessor(processor);
+  }
+
+  /**
+   * Save the Tokenizer as JSON to the given path
+   * @param path Path to the JSON file to write
+   * @param [pretty=false] Whether the JSON string should be prettified
+   */
+  save(path: string, pretty?: boolean): void {
+    return this.tokenizer.save(path, pretty);
+  }
+
+  /**
+   * Get a serialized JSON version of the Tokenizer as a string
+   * @param [pretty=false] Whether the JSON string should be prettified
+   */
+  toString(pretty?: boolean): string {
+    return this.tokenizer.toString(pretty);
+  }
+}
+
+/**
+ * Get the string content from a token, which can be a string or AddedToken
+ * @param token The token from which get the content
+ */
+export function getTokenContent(token: Token): string {
+  return typeof token === "string" ? token : token.getContent();
 }

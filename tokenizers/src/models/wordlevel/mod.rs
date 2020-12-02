@@ -7,6 +7,14 @@ use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
+mod serialization;
+mod trainer;
+
+// Re-export
+pub use trainer::*;
+
+type Vocab = HashMap<String, u32>;
+
 #[derive(Debug)]
 pub enum Error {
     MissingUnkToken,
@@ -27,6 +35,7 @@ impl fmt::Display for Error {
 }
 
 struct Config {
+    files: Option<String>,
     vocab: HashMap<String, u32>,
     unk_token: String,
 }
@@ -41,6 +50,7 @@ impl Default for WordLevelBuilder {
     fn default() -> Self {
         Self {
             config: Config {
+                files: None,
                 vocab: HashMap::new(),
                 unk_token: String::from("<unk>"),
             },
@@ -52,6 +62,12 @@ impl WordLevelBuilder {
     /// Construct a new `WordLevelBuilder`.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Set the input files.
+    pub fn files(mut self, vocab: String) -> Self {
+        self.config.files = Some(vocab);
+        self
     }
 
     /// Set the vocab (token -> ID) mapping.
@@ -67,35 +83,48 @@ impl WordLevelBuilder {
     }
 
     /// Contructs a `WordLevel` model that uses the `WordLevelBuilder`'s configuration.
-    pub fn build(self) -> WordLevel {
+    pub fn build(mut self) -> Result<WordLevel> {
+        if let Some(vocab) = self.config.files {
+            self.config.vocab = WordLevel::read_file(&vocab)?;
+        }
+
         let vocab_r = self
             .config
             .vocab
             .iter()
             .map(|(key, val)| (*val, key.to_owned()))
             .collect();
-        WordLevel {
+
+        Ok(WordLevel {
             vocab: self.config.vocab,
             vocab_r,
             unk_token: self.config.unk_token,
-        }
+        })
     }
 }
 
+#[derive(PartialEq, Clone)]
 pub struct WordLevel {
     vocab: HashMap<String, u32>,
     vocab_r: HashMap<u32, String>,
-    unk_token: String,
+    pub unk_token: String,
+}
+
+impl std::fmt::Debug for WordLevel {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        fmt.debug_struct("WordLevel")
+            .field("unk_token", &self.unk_token)
+            .field("vocab", &self.vocab.len())
+            .finish()
+    }
 }
 
 impl WordLevel {
-    fn builder() -> WordLevelBuilder {
+    pub fn builder() -> WordLevelBuilder {
         WordLevelBuilder::new()
     }
 
-    /// Initialize a WordLevel model from vocab and merges file.
-    pub fn from_files(vocab_path: &str, unk_token: String) -> Result<WordLevel> {
-        // Read vocab.json
+    pub fn read_file(vocab_path: &str) -> Result<Vocab> {
         let vocab_file = File::open(vocab_path)?;
         let mut vocab_file = BufReader::new(vocab_file);
         let mut buffer = String::new();
@@ -115,8 +144,13 @@ impl WordLevel {
             }
             _ => return Err(Box::new(Error::BadVocabulary)),
         };
+        Ok(vocab)
+    }
 
-        Ok(Self::builder().vocab(vocab).unk_token(unk_token).build())
+    /// Initialize a WordLevel model from vocab and merges file.
+    pub fn from_file(vocab_path: &str, unk_token: String) -> Result<WordLevel> {
+        let vocab = WordLevel::read_file(vocab_path)?;
+        Self::builder().vocab(vocab).unk_token(unk_token).build()
     }
 }
 
@@ -131,24 +165,18 @@ impl Default for WordLevel {
 }
 
 impl Model for WordLevel {
-    fn tokenize(&self, tokens: Vec<(String, (usize, usize))>) -> Result<Vec<Token>> {
-        let mut output_tokens = vec![];
+    type Trainer = WordLevelTrainer;
 
-        for (token, initial_offsets) in tokens {
-            let t = Token {
-                id: *self
-                    .vocab
-                    .get(&*token)
-                    .or_else(|| self.vocab.get(&*self.unk_token))
-                    .ok_or(Error::MissingUnkToken)?,
-                value: token,
-                offsets: initial_offsets,
-            };
-
-            output_tokens.push(t);
-        }
-
-        Ok(output_tokens)
+    fn tokenize(&self, token: &str) -> Result<Vec<Token>> {
+        Ok(vec![Token {
+            id: *self
+                .vocab
+                .get(&*token)
+                .or_else(|| self.vocab.get(&*self.unk_token))
+                .ok_or(Error::MissingUnkToken)?,
+            value: token.to_owned(),
+            offsets: (0, token.len()),
+        }])
     }
 
     fn token_to_id(&self, token: &str) -> Option<u32> {
@@ -157,6 +185,10 @@ impl Model for WordLevel {
 
     fn id_to_token(&self, id: u32) -> Option<String> {
         self.vocab_r.get(&id).cloned()
+    }
+
+    fn get_vocab(&self) -> HashMap<String, u32> {
+        self.vocab.clone()
     }
 
     fn get_vocab_size(&self) -> usize {
@@ -179,5 +211,9 @@ impl Model for WordLevel {
         vocab_file.write_all(&serialized.as_bytes())?;
 
         Ok(vec![vocab_path])
+    }
+
+    fn get_trainer(&self) -> Self::Trainer {
+        WordLevelTrainer::default()
     }
 }

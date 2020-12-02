@@ -9,7 +9,7 @@
         <img alt="GitHub" src="https://img.shields.io/github/license/huggingface/tokenizers.svg?color=blue">
     </a>
     <a href="https://docs.rs/tokenizers/">
-        <img alt="Doc" src="https://docs.rs/tokenizers/badge.svg">    
+        <img alt="Doc" src="https://docs.rs/tokenizers/badge.svg">
     </a>
 </p>
 <br>
@@ -33,23 +33,75 @@ The various steps of the pipeline are:
 4. The `PostProcessor`: in charge of post-processing the `Encoding` to add anything relevant
    that, for example, a language model would need, such as special tokens.
 
-## Quick example
+### Deserialization and tokenization example
 
-```Rust
+```rust
 use tokenizers::tokenizer::{Result, Tokenizer, EncodeInput};
 use tokenizers::models::bpe::BPE;
 
 fn main() -> Result<()> {
-    let bpe_builder = BPE::from_files("./path/to/vocab.json", "./path/to/merges.txt")?;
+    let bpe_builder = BPE::from_file("./path/to/vocab.json", "./path/to/merges.txt");
     let bpe = bpe_builder
         .dropout(0.1)
         .unk_token("[UNK]".into())
         .build()?;
 
-    let mut tokenizer = Tokenizer::new(Box::new(bpe));
+    let mut tokenizer = Tokenizer::new(bpe);
 
-    let encoding = tokenizer.encode(EncodeInput::Single("Hey there!".into()))?;
+    let encoding = tokenizer.encode("Hey there!", false)?;
     println!("{:?}", encoding.get_tokens());
+
+    Ok(())
+}
+```
+
+### Training and serialization example
+
+```rust
+use tokenizers::decoders::DecoderWrapper;
+use tokenizers::models::bpe::{BpeTrainerBuilder, BPE};
+use tokenizers::normalizers::{strip::Strip, unicode::NFC, utils::Sequence, NormalizerWrapper};
+use tokenizers::pre_tokenizers::byte_level::ByteLevel;
+use tokenizers::pre_tokenizers::PreTokenizerWrapper;
+use tokenizers::processors::PostProcessorWrapper;
+use tokenizers::{AddedToken, Model, Result, TokenizerBuilder};
+
+use std::path::Path;
+
+fn main() -> Result<()> {
+    let vocab_size: usize = 100;
+
+    let mut trainer = BpeTrainerBuilder::new()
+        .show_progress(true)
+        .vocab_size(vocab_size)
+        .min_frequency(0)
+        .special_tokens(vec![
+            AddedToken::from(String::from("<s>"), true),
+            AddedToken::from(String::from("<pad>"), true),
+            AddedToken::from(String::from("</s>"), true),
+            AddedToken::from(String::from("<unk>"), true),
+            AddedToken::from(String::from("<mask>"), true),
+        ])
+        .build();
+
+    let mut tokenizer = TokenizerBuilder::new()
+        .with_model(BPE::default())
+        .with_normalizer(Some(Sequence::new(vec![
+            Strip::new(true, true).into(),
+            NFC.into(),
+        ])))
+        .with_pre_tokenizer(Some(ByteLevel::default()))
+        .with_post_processor(Some(ByteLevel::default()))
+        .with_decoder(Some(ByteLevel::default()))
+        .build()?;
+
+    let pretty = false;
+    tokenizer
+        .train_from_files(
+            &mut trainer,
+            vec!["path/to/vocab.txt".to_string()],
+        )?
+        .save("tokenizer.json", pretty)?;
 
     Ok(())
 }
@@ -61,3 +113,8 @@ fn main() -> Result<()> {
 by the total number of core/threads your CPU provides but this can be tuned by setting the `RAYON_RS_NUM_CPUS`
 environment variable. As an example setting `RAYON_RS_NUM_CPUS=4` will allocate a maximum of 4 threads.
 **_Please note this behavior may evolve in the future_**
+
+## Features
+**progressbar**: The progress bar visualization is enabled by default. It might be disabled if
+  compilation for certain targets is not supported by the [termios](https://crates.io/crates/termios)
+  dependency of the [indicatif](https://crates.io/crates/indicatif) progress bar.

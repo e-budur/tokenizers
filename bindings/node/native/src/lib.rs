@@ -1,11 +1,14 @@
 #![warn(clippy::all)]
 
 extern crate neon;
+extern crate neon_serde;
+#[macro_use]
+extern crate serde;
 extern crate tokenizers as tk;
 
-mod container;
 mod decoders;
 mod encoding;
+mod extraction;
 mod models;
 mod normalizers;
 mod pre_tokenizers;

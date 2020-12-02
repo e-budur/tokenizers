@@ -1,5 +1,6 @@
 const native = require("./native");
 
 module.exports = {
-  slice: native.utils_slice
+  mergeEncodings: native.utils_mergeEncodings,
+  slice: native.utils_slice,
 };

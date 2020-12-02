@@ -3,7 +3,9 @@
  * PreTokenizer will return an instance of this class when instantiated.
  */
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
-interface PreTokenizer {}
+interface PreTokenizer {
+  preTokenizeString(s: string): [string, [number, number]][];
+}
 
 /**
  * Instantiate a new ByteLevel PreTokenizer
@@ -38,6 +40,24 @@ export function whitespacePreTokenizer(): PreTokenizer;
 export function whitespaceSplitPreTokenizer(): PreTokenizer;
 
 /**
+ * Returns a Split PreTokenizer
+ * This versatile pre-tokenizer splits using the provided pattern and
+ * according to the provided behavior. The pattern can be inverted by
+ * making use of the invert flag.
+ *
+ * @param [pattern] A pattern used to split the string. Usually a string or a Regex.
+ * @param [behavior] The behavior to use when splitting.
+ * Choices: "removed", "isolated", "mergedWithPrevious", "mergedWithNext",
+ * "contiguous".
+ * @param [invert=false] Whether to invert the pattern.
+ */
+export function splitPreTokenizer(
+  pattern?: string,
+  behavior?: string,
+  invert?: boolean
+): PreTokenizer;
+
+/**
  * Returns a new Bert PreTokenizer.
  * This pre-tokenizer splits tokens on spaces, and also on punctuation.
  * Each occurrence of a punctuation character will be treated separately.
@@ -67,3 +87,25 @@ export function metaspacePreTokenizer(
  * @param delimiter The delimiter character on which the sequence will be split.
  */
 export function charDelimiterSplitPreTokenizer(delimiter: string): PreTokenizer;
+
+/**
+ * Returns a new Punctuation PreTokenizer.
+ * This pre-tokenizer splits tokens on punctuation.
+ * Each occurrence of a punctuation character will be treated separately.
+ */
+export function punctuationPreTokenizer(): PreTokenizer;
+
+/**
+ * Returns a new Sequence PreTokenizer.
+ * This pre-tokenizer combines other pretokenizers and applies them.
+ * sequentially.
+ */
+export function sequencePreTokenizer(pretokenizers: PreTokenizer[]): PreTokenizer;
+
+/**
+ * Returns a new Digits PreTokenizer.
+ * This pre-tokenizer splits on numbers. Optionnaly it can split on individual digits.
+ *
+ * @param [individualDigits=false] Whether to split on individual digits.
+ */
+export function digitsPreTokenizer(individualDigits?: boolean): PreTokenizer;

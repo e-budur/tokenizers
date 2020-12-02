@@ -1,10 +1,13 @@
 extern crate tokenizers as tk;
 
+use crate::encoding::JsEncoding;
+use crate::extraction::*;
+use crate::tokenizer::Encoding;
 use neon::prelude::*;
 
 /// slice(s: string, start?: number, end?: number)
 fn slice(mut cx: FunctionContext) -> JsResult<JsString> {
-    let s = cx.argument::<JsString>(0)?.value();
+    let s = cx.extract::<String>(0)?;
     let len = s.chars().count();
 
     let get_index = |x: i32| -> usize {
@@ -15,37 +18,37 @@ fn slice(mut cx: FunctionContext) -> JsResult<JsString> {
         }
     };
 
-    let begin_index = if let Some(begin_arg) = cx.argument_opt(1) {
-        if begin_arg.downcast::<JsUndefined>().is_err() {
-            let begin = begin_arg.downcast::<JsNumber>().or_throw(&mut cx)?.value() as i32;
-            get_index(begin)
-        } else {
-            0
-        }
-    } else {
-        0
-    };
+    let begin_index = get_index(cx.extract_opt::<i32>(1)?.unwrap_or(0));
+    let end_index = get_index(cx.extract_opt::<i32>(2)?.unwrap_or(len as i32));
 
-    let end_index = if let Some(end_arg) = cx.argument_opt(2) {
-        if end_arg.downcast::<JsUndefined>().is_err() {
-            let end = end_arg.downcast::<JsNumber>().or_throw(&mut cx)?.value() as i32;
-            get_index(end)
-        } else {
-            len
-        }
-    } else {
-        len
-    };
-
-    if let Some(slice) = tk::tokenizer::get_range_of(&s, begin_index..end_index) {
+    if let Some(slice) = tk::tokenizer::normalizer::get_range_of(&s, begin_index..end_index) {
         Ok(cx.string(slice))
     } else {
         cx.throw_error("Error in offsets")
     }
 }
 
+/// merge_encodings(encodings: Encoding[], growing_offsets: boolean = false): Encoding
+fn merge_encodings(mut cx: FunctionContext) -> JsResult<JsEncoding> {
+    let encodings: Vec<tk::Encoding> = cx
+        .extract_vec::<Encoding>(0)?
+        .into_iter()
+        .map(|e| e.into())
+        .collect();
+    let growing_offsets = cx.extract_opt::<bool>(1)?.unwrap_or(false);
+
+    let new_encoding = tk::tokenizer::Encoding::merge(encodings, growing_offsets);
+    let mut js_encoding = JsEncoding::new::<_, JsEncoding, _>(&mut cx, vec![])?;
+
+    let guard = cx.lock();
+    js_encoding.borrow_mut(&guard).encoding = Some(new_encoding);
+
+    Ok(js_encoding)
+}
+
 /// Register everything here
 pub fn register(m: &mut ModuleContext, prefix: &str) -> NeonResult<()> {
     m.export_function(&format!("{}_slice", prefix), slice)?;
+    m.export_function(&format!("{}_mergeEncodings", prefix), merge_encodings)?;
     Ok(())
 }

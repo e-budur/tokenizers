@@ -8,6 +8,12 @@ describe("wordPieceDecoder", () => {
   it("accepts `undefined` as second parameter", () => {
     expect(wordPieceDecoder("test", undefined)).toBeDefined();
   });
+
+  it("can decode arrays of strings", () => {
+    expect(
+      wordPieceDecoder().decode(["Hel", "##lo", "there", "my", "fr", "##iend"])
+    ).toEqual("Hello there my friend");
+  });
 });
 
 describe("metaspaceDecoder", () => {
@@ -16,7 +22,7 @@ describe("metaspaceDecoder", () => {
   });
 
   it("accepts `undefined` as second parameter", () => {
-    expect(metaspaceDecoder("test", undefined)).toBeDefined();
+    expect(metaspaceDecoder("t", undefined)).toBeDefined();
   });
 });
 

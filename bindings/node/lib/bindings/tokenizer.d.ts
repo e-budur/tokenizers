@@ -15,11 +15,11 @@ export interface TruncationOptions {
   stride?: number;
   /**
    * Strategy to use:
-   * - `longest_first` Iteratively reduce the inputs sequence until the input is under max_length
+   * - `TruncationStrategy.LongestFirst` Iteratively reduce the inputs sequence until the input is under max_length
    * starting from the longest one at each token (when there is a pair of input sequences).
-   * - `only_first` Only truncate the first sequence.
-   * - `only_second` Only truncate the second sequence.
-   * @default "longest_first"
+   * - `TruncationStrategy.OnlyFirst` Only truncate the first sequence.
+   * - `TruncationStrategy.OnlySecond` Only truncate the second sequence.
+   * @default TruncationStrategy.LongestFirst
    */
   strategy?: TruncationStrategy;
 }
@@ -31,12 +31,14 @@ export interface TruncationConfiguration extends Required<TruncationOptions> {
   maxLength: number;
 }
 
-export type PaddingConfiguration = Required<Omit<PaddingOptions, "maxLength">> &
-  Pick<PaddingOptions, "maxLength">;
+export type PaddingConfiguration = Required<
+  Omit<PaddingOptions, "maxLength" | "padToMultipleOf">
+> &
+  Pick<PaddingOptions, "maxLength" | "padToMultipleOf">;
 
 export interface PaddingOptions {
   /**
-   * @default "right"
+   * @default PaddingDirection.Right
    */
   direction?: PaddingDirection;
   /**
@@ -45,6 +47,11 @@ export interface PaddingOptions {
    * - No padding will be applied when single encoding
    */
   maxLength?: number;
+  /**
+   * If specified, the padding will snap to a multiple of the given value.
+   * @default undefined
+   */
+  padToMultipleOf?: number;
   /**
    * The index to be used when padding
    * @default 0
@@ -60,6 +67,29 @@ export interface PaddingOptions {
    * @default "[PAD]"
    */
   padToken?: string;
+}
+
+export type TextInputSequence = string;
+export type PreTokenizedInputSequence = string[];
+export type InputSequence = TextInputSequence | PreTokenizedInputSequence;
+
+export type TextEncodeInput = TextInputSequence | [TextInputSequence, TextInputSequence];
+export type PreTokenizedEncodeInput =
+  | PreTokenizedInputSequence
+  | [PreTokenizedInputSequence, PreTokenizedInputSequence];
+export type EncodeInput = TextEncodeInput | PreTokenizedEncodeInput;
+
+export interface EncodeOptions {
+  /**
+   * Whether the given sequence is pre-tokenized
+   * @default false
+   */
+  isPretokenized?: boolean;
+  /**
+   * Whether we should add special tokens
+   * @default true
+   */
+  addSpecialTokens?: boolean;
 }
 
 /**
@@ -82,24 +112,35 @@ export class Tokenizer {
   constructor(model: Model);
 
   /**
+   * Instantiate a new Tokenizer from the given file
+   * @param path Path to a file containing a Tokenizer
+   */
+  static fromFile(path: string): Tokenizer;
+
+  /**
+   * Instantiate a new Tokenizer from the given JSON string
+   * @param s A JSON string representation of the Tokenizer
+   */
+  static fromString(s: string): Tokenizer;
+
+  /**
    * Add the given tokens to the vocabulary
    *
    * @param tokens A list of tokens to add to the vocabulary.
-   * Each token can either be a string, or a tuple with a string representing the token,
-   * and a boolean option representing whether to match on single words only.
-   * If the boolean is not included, it defaults to False
+   * Each token can either be a string, or an instance of {@link AddedToken}.
    * @returns The number of tokens that were added to the vocabulary
    */
-  addTokens(tokens: (string | [string, boolean])[]): number;
+  addTokens(tokens: (string | AddedToken)[]): number;
 
   /**
    * Add the given special tokens to the vocabulary, and treat them as special tokens.
    * The special tokens will never be processed by the model, and will be removed while decoding.
    *
-   * @param tokens The list of special tokens to add
+   * @param tokens The list of special tokens to add.
+   * Each token can either be a string or an instance of {@link AddedToken}.
    * @returns The number of tokens that were added to the vocabulary
    */
-  addSpecialTokens(tokens: string[]): number;
+  addSpecialTokens(tokens: (string | AddedToken)[]): number;
 
   /**
    * Encode the given sequence
@@ -110,10 +151,10 @@ export class Tokenizer {
    * @param __callback Callback called when encoding is complete
    */
   encode(
-    sequence: string,
-    pair: string | null,
-    addSpecialTokens: boolean,
-    __callback: (err: Error, encoding: RawEncoding) => void
+    sequence: InputSequence,
+    pair?: InputSequence | null,
+    options?: EncodeOptions | null, // |(err: Error, encoding: RawEncoding) => void,
+    __callback?: (err: Error, encoding: RawEncoding) => void
   ): void;
 
   /**
@@ -124,9 +165,9 @@ export class Tokenizer {
    * @param __callback Callback called when encoding is complete
    */
   encodeBatch(
-    sequences: (string | [string, string])[],
-    addSpecialTokens: boolean,
-    __callback: (err: Error, encodings: RawEncoding[]) => void
+    inputs: EncodeInput[],
+    options?: EncodeOptions | null, // (err: Error, encodings: RawEncoding[]) => void,
+    __callback?: (err: Error, encodings: RawEncoding[]) => void
   ): void;
 
   /**
@@ -154,14 +195,6 @@ export class Tokenizer {
     skipSpecialTokens: boolean,
     __callback: (err: Error, encodings: string[]) => void
   ): void[];
-
-  /**
-   * Normalize the given sequence
-   * @param text The sequence to normalize
-   * @returns The normalized string
-   * @since 0.6.0
-   */
-  normalize(text: string): string;
 
   /**
    * Convert the given token id to its corresponding string
@@ -210,6 +243,13 @@ export class Tokenizer {
    * @param files List of files to use
    */
   train(trainer: Trainer, files: string[]): void;
+
+  /**
+   * Returns the vocabulary
+   *
+   * @param [withAddedTokens=true] Whether to include the added tokens in the vocabulary
+   */
+  getVocab(withAddedTokens?: boolean): { [token: string]: number };
 
   /**
    * Returns the size of the vocabulary
@@ -287,4 +327,90 @@ export class Tokenizer {
    * @throws Will throw an error if the decoder is already used in another Tokenizer
    */
   setDecoder(decoder: Decoder): void;
+
+  /**
+   * Apply all the post-processing steps to the given encodings.
+   * The various steps are:
+   * 1. Truncate according to global params (@see setTruncation)
+   * 2. Apply the PostProcessor
+   * 3. Pad according to global params (@see setPadding)
+   * @param encoding The main Encoding to post process
+   * @param [pair] An optional pair Encoding
+   * @param [addSpecialTokens=true] Whether to add special tokens. Default to `true`.
+   * @since 0.6.0
+   */
+  postProcess(
+    encoding: RawEncoding,
+    pair?: RawEncoding,
+    addSpecialTokens?: boolean
+  ): RawEncoding;
+
+  /**
+   * Save the Tokenizer as JSON to the given path
+   * @param path Path to the JSON file to write
+   * @param [pretty=false] Whether the JSON string should be prettified
+   */
+  save(path: string, pretty?: boolean): void;
+
+  /**
+   * Get a serialized JSON version of the Tokenizer as a string
+   * @param [pretty=false] Whether the JSON string should be prettified
+   */
+  toString(pretty?: boolean): string;
+}
+
+/**
+ * Options used to construct an AddedToken
+ * @since 0.6.0
+ */
+export interface AddedTokenOptions {
+  /**
+   * Whether this token should strip all potential whitespaces on the left side.
+   * If True, this token will greedily match any whitespace on the left and then strip
+   * them out.
+   * @default False
+   */
+  leftStrip?: boolean;
+  /**
+   * Whether this token should strip all potential whitespaces on the right side.
+   * If True, this token will greedily match any whitespace on the right and then strip
+   * them out.
+   * @default False
+   */
+  rightStrip?: boolean;
+  /**
+   * Whether this token should only match against single word.
+   * If True, this token will never match inside of a word.
+   * @default False
+   */
+  singleWord?: boolean;
+  /**
+   * Whether this token should match on the normalized version of the text. For example
+   * with the added token `yesterday` and a normalizer in charge of lowercasing the text,
+   * the input `I saw a lion Yesterday` would match the token.
+   * This is False for special tokens by default, true otherwise
+   * @default True
+   */
+  normalized?: boolean;
+}
+
+/**
+ * AddedToken represents a token to be added to a Tokenizer.
+ * An AddedToken can have special options defining the way it should behave.
+ *
+ * @since 0.6.0
+ */
+export class AddedToken {
+  /**
+   * Instantiate a new AddedToken
+   * @param content The content of the token
+   * @param special Whether this is a special token
+   * @param [options] Options for the token
+   */
+  constructor(content: string, special: boolean, options?: AddedTokenOptions);
+
+  /**
+   * Get the content of the AddedToken
+   */
+  getContent(): string;
 }

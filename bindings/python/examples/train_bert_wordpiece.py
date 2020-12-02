@@ -32,11 +32,14 @@ if not files:
 
 # Initialize an empty tokenizer
 tokenizer = BertWordPieceTokenizer(
-    clean_text=True, handle_chinese_chars=True, strip_accents=True, lowercase=True,
+    clean_text=True,
+    handle_chinese_chars=True,
+    strip_accents=True,
+    lowercase=True,
 )
 
 # And then train
-trainer = tokenizer.train(
+tokenizer.train(
     files,
     vocab_size=10000,
     min_frequency=2,
@@ -47,4 +50,4 @@ trainer = tokenizer.train(
 )
 
 # Save the files
-tokenizer.save(args.out, args.name)
+tokenizer.save_model(args.out, args.name)

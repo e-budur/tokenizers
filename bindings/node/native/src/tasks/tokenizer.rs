@@ -1,29 +1,13 @@
 extern crate tokenizers as tk;
 
 use crate::encoding::*;
+use crate::tokenizer::Tokenizer;
 use neon::prelude::*;
-use tk::tokenizer::{EncodeInput, Encoding, Tokenizer};
+use tk::tokenizer::{EncodeInput, Encoding};
 
-pub struct WorkingTokenizer {
-    _arc: std::sync::Arc<()>,
-    ptr: *const Tokenizer,
-}
-impl WorkingTokenizer {
-    /// This is unsafe because the caller must ensure that the given tokenizer
-    /// wont be modified for the duration of the task. We keep an arc here to let the
-    /// caller know when we are done with our pointer on Tokenizer
-    pub unsafe fn new(tokenizer: &Tokenizer, arc: std::sync::Arc<()>) -> Self {
-        WorkingTokenizer {
-            _arc: arc,
-            ptr: tokenizer as *const _,
-        }
-    }
-}
-unsafe impl Send for WorkingTokenizer {}
-
-pub enum EncodeTask {
-    Single(WorkingTokenizer, Option<EncodeInput>, bool),
-    Batch(WorkingTokenizer, Option<Vec<EncodeInput>>, bool),
+pub enum EncodeTask<'s> {
+    Single(Tokenizer, Option<EncodeInput<'s>>, bool),
+    Batch(Tokenizer, Option<Vec<EncodeInput<'s>>>, bool),
 }
 
 pub enum EncodeOutput {
@@ -31,7 +15,7 @@ pub enum EncodeOutput {
     Batch(Vec<Encoding>),
 }
 
-impl Task for EncodeTask {
+impl Task for EncodeTask<'static> {
     type Output = EncodeOutput;
     type Error = String;
     type JsEvent = JsValue;
@@ -39,26 +23,34 @@ impl Task for EncodeTask {
     fn perform(&self) -> Result<Self::Output, Self::Error> {
         match self {
             EncodeTask::Single(worker, input, add_special_tokens) => {
-                let mut input = unsafe { std::ptr::replace(input as *const _ as *mut _, None) };
-                let tokenizer: &Tokenizer = unsafe { &*worker.ptr };
-                tokenizer
-                    .encode(
+                let mut input: Option<EncodeInput> =
+                    unsafe { std::ptr::replace(input as *const _ as *mut _, None) };
+
+                worker
+                    .tokenizer
+                    .read()
+                    .unwrap()
+                    .encode_char_offsets(
                         input.take().ok_or("No provided input")?,
                         *add_special_tokens,
                     )
                     .map_err(|e| format!("{}", e))
-                    .map(|encoding| EncodeOutput::Single(encoding))
+                    .map(EncodeOutput::Single)
             }
             EncodeTask::Batch(worker, input, add_special_tokens) => {
-                let mut input = unsafe { std::ptr::replace(input as *const _ as *mut _, None) };
-                let tokenizer: &Tokenizer = unsafe { &*worker.ptr };
-                tokenizer
-                    .encode_batch(
+                let mut input: Option<Vec<EncodeInput>> =
+                    unsafe { std::ptr::replace(input as *const _ as *mut _, None) };
+
+                worker
+                    .tokenizer
+                    .read()
+                    .unwrap()
+                    .encode_batch_char_offsets(
                         input.take().ok_or("No provided input")?,
                         *add_special_tokens,
                     )
                     .map_err(|e| format!("{}", e))
-                    .map(|encodings| EncodeOutput::Batch(encodings))
+                    .map(EncodeOutput::Batch)
             }
         }
     }
@@ -73,11 +65,7 @@ impl Task for EncodeTask {
                 let mut js_encoding = JsEncoding::new::<_, JsEncoding, _>(&mut cx, vec![])?;
                 // Set the actual encoding
                 let guard = cx.lock();
-                js_encoding
-                    .borrow_mut(&guard)
-                    .encoding
-                    .to_owned(Box::new(encoding));
-
+                js_encoding.borrow_mut(&guard).encoding = Some(encoding);
                 Ok(js_encoding.upcast())
             }
             EncodeOutput::Batch(encodings) => {
@@ -87,10 +75,7 @@ impl Task for EncodeTask {
 
                     // Set the actual encoding
                     let guard = cx.lock();
-                    js_encoding
-                        .borrow_mut(&guard)
-                        .encoding
-                        .to_owned(Box::new(encoding));
+                    js_encoding.borrow_mut(&guard).encoding = Some(encoding);
 
                     result.set(&mut cx, i as u32, js_encoding)?;
                 }
@@ -101,8 +86,8 @@ impl Task for EncodeTask {
 }
 
 pub enum DecodeTask {
-    Single(WorkingTokenizer, Vec<u32>, bool),
-    Batch(WorkingTokenizer, Vec<Vec<u32>>, bool),
+    Single(Tokenizer, Vec<u32>, bool),
+    Batch(Tokenizer, Vec<Vec<u32>>, bool),
 }
 
 pub enum DecodeOutput {
@@ -117,20 +102,20 @@ impl Task for DecodeTask {
 
     fn perform(&self) -> Result<Self::Output, Self::Error> {
         match self {
-            DecodeTask::Single(worker, ids, skip_special_tokens) => {
-                let tokenizer: &Tokenizer = unsafe { &*worker.ptr };
-                tokenizer
-                    .decode(ids.to_vec(), *skip_special_tokens)
-                    .map_err(|e| format!("{}", e))
-                    .map(DecodeOutput::Single)
-            }
-            DecodeTask::Batch(worker, ids, skip_special_tokens) => {
-                let tokenizer: &Tokenizer = unsafe { &*worker.ptr };
-                tokenizer
-                    .decode_batch(ids.to_vec(), *skip_special_tokens)
-                    .map_err(|e| format!("{}", e))
-                    .map(DecodeOutput::Batch)
-            }
+            DecodeTask::Single(worker, ids, skip_special_tokens) => worker
+                .tokenizer
+                .read()
+                .unwrap()
+                .decode(ids.to_vec(), *skip_special_tokens)
+                .map_err(|e| format!("{}", e))
+                .map(DecodeOutput::Single),
+            DecodeTask::Batch(worker, ids, skip_special_tokens) => worker
+                .tokenizer
+                .read()
+                .unwrap()
+                .decode_batch(ids.to_vec(), *skip_special_tokens)
+                .map_err(|e| format!("{}", e))
+                .map(DecodeOutput::Batch),
         }
     }
 

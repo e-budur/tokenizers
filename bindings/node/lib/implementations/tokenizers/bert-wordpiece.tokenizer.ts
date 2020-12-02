@@ -7,13 +7,9 @@ import { bertProcessing } from "../../bindings/post-processors";
 import { bertPreTokenizer } from "../../bindings/pre-tokenizers";
 import { Tokenizer } from "../../bindings/tokenizer";
 import { wordPieceTrainer } from "../../bindings/trainers";
-import { BaseTokenizer } from "./base.tokenizer";
+import { BaseTokenizer, getTokenContent, Token } from "./base.tokenizer";
 
 export interface BertWordPieceOptions {
-  /**
-   * @default true
-   */
-  addSpecialTokens?: boolean;
   /**
    * @default true
    */
@@ -21,7 +17,7 @@ export interface BertWordPieceOptions {
   /**
    * @default "[CLS]"
    */
-  clsToken?: string;
+  clsToken?: Token;
   /**
    * @default true
    */
@@ -33,15 +29,15 @@ export interface BertWordPieceOptions {
   /**
    * @default "[MASK]"
    */
-  maskToken?: string;
+  maskToken?: Token;
   /**
    * @default "[PAD]"
    */
-  padToken?: string;
+  padToken?: Token;
   /**
    * @default "[SEP]"
    */
-  sepToken?: string;
+  sepToken?: Token;
   /**
    * @default true
    */
@@ -49,7 +45,7 @@ export interface BertWordPieceOptions {
   /**
    * @default "[UNK]"
    */
-  unkToken?: string;
+  unkToken?: Token;
   vocabFile?: string;
   /**
    * The prefix to attach to subword units that don't represent a beginning of word
@@ -78,7 +74,7 @@ export interface BertWordPieceTrainOptions {
   /**
    * @default ["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]"]
    */
-  specialTokens?: string[];
+  specialTokens?: Token[];
   /**
    * @default 30000
    */
@@ -99,7 +95,6 @@ type BertTokenizerConfig = Required<Omit<BertWordPieceOptions, "vocabFile">> & {
  */
 export class BertWordPieceTokenizer extends BaseTokenizer<BertTokenizerConfig> {
   private static readonly defaultBertOptions: BertTokenizerConfig = {
-    addSpecialTokens: true,
     cleanText: true,
     clsToken: "[CLS]",
     handleChineseChars: true,
@@ -109,7 +104,7 @@ export class BertWordPieceTokenizer extends BaseTokenizer<BertTokenizerConfig> {
     sepToken: "[SEP]",
     stripAccents: true,
     unkToken: "[UNK]",
-    wordpiecesPrefix: "##"
+    wordpiecesPrefix: "##",
   };
 
   private readonly defaultTrainOptions: Required<BertWordPieceTrainOptions> = {
@@ -119,7 +114,7 @@ export class BertWordPieceTokenizer extends BaseTokenizer<BertTokenizerConfig> {
     showProgress: true,
     specialTokens: ["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]"],
     vocabSize: 30000,
-    wordpiecesPrefix: "##"
+    wordpiecesPrefix: "##",
   };
 
   private constructor(tokenizer: Tokenizer, configuration: BertTokenizerConfig) {
@@ -137,10 +132,10 @@ export class BertWordPieceTokenizer extends BaseTokenizer<BertTokenizerConfig> {
 
     let model: Model;
     if (opts.vocabFile) {
-      const fromFiles = promisify<string, WordPieceOptions, Model>(WordPiece.fromFiles);
-      model = await fromFiles(opts.vocabFile, {
-        unkToken: opts.unkToken,
-        continuingSubwordPrefix: opts.wordpiecesPrefix
+      const fromFile = promisify<string, WordPieceOptions, Model>(WordPiece.fromFile);
+      model = await fromFile(opts.vocabFile, {
+        unkToken: getTokenContent(opts.unkToken),
+        continuingSubwordPrefix: opts.wordpiecesPrefix,
       });
     } else {
       model = WordPiece.empty();
@@ -153,9 +148,9 @@ export class BertWordPieceTokenizer extends BaseTokenizer<BertTokenizerConfig> {
       opts.sepToken,
       opts.unkToken,
       opts.padToken,
-      opts.maskToken
+      opts.maskToken,
     ]) {
-      if (tokenizer.tokenToId(token) !== undefined) {
+      if (tokenizer.tokenToId(getTokenContent(token)) !== undefined) {
         tokenizer.addSpecialTokens([token]);
       }
     }
@@ -164,20 +159,20 @@ export class BertWordPieceTokenizer extends BaseTokenizer<BertTokenizerConfig> {
     tokenizer.setNormalizer(normalizer);
     tokenizer.setPreTokenizer(bertPreTokenizer());
 
-    if (opts.vocabFile && opts.addSpecialTokens) {
-      const sepTokenId = tokenizer.tokenToId(opts.sepToken);
+    if (opts.vocabFile) {
+      const sepTokenId = tokenizer.tokenToId(getTokenContent(opts.sepToken));
       if (sepTokenId === undefined) {
         throw new Error("sepToken not found in the vocabulary");
       }
 
-      const clsTokenId = tokenizer.tokenToId(opts.clsToken);
+      const clsTokenId = tokenizer.tokenToId(getTokenContent(opts.clsToken));
       if (clsTokenId === undefined) {
         throw new Error("clsToken not found in the vocabulary");
       }
 
       const processor = bertProcessing(
-        [opts.sepToken, sepTokenId],
-        [opts.clsToken, clsTokenId]
+        [getTokenContent(opts.sepToken), sepTokenId],
+        [getTokenContent(opts.clsToken), clsTokenId]
       );
       tokenizer.setPostProcessor(processor);
     }

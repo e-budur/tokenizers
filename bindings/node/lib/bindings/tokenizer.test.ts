@@ -5,9 +5,16 @@ import { promisify } from "util";
 
 import { PaddingDirection, TruncationStrategy } from "./enums";
 import { BPE } from "./models";
-import { lowercaseNormalizer } from "./normalizers";
 import { RawEncoding } from "./raw-encoding";
-import { PaddingConfiguration, Tokenizer, TruncationConfiguration } from "./tokenizer";
+import {
+  AddedToken,
+  EncodeInput,
+  EncodeOptions,
+  InputSequence,
+  PaddingConfiguration,
+  Tokenizer,
+  TruncationConfiguration,
+} from "./tokenizer";
 
 // jest.mock('../bindings/tokenizer');
 // jest.mock('../bindings/models', () => ({
@@ -22,10 +29,41 @@ import { PaddingConfiguration, Tokenizer, TruncationConfiguration } from "./toke
 
 // const TokenizerMock = mocked(Tokenizer);
 
+describe("AddedToken", () => {
+  it("instantiates with only content", () => {
+    const addToken = new AddedToken("test", false);
+    expect(addToken.constructor.name).toEqual("AddedToken");
+  });
+
+  it("instantiates with empty options", () => {
+    const addToken = new AddedToken("test", false, {});
+    expect(addToken.constructor.name).toEqual("AddedToken");
+  });
+
+  it("instantiates with options", () => {
+    const addToken = new AddedToken("test", false, {
+      leftStrip: true,
+      rightStrip: true,
+      singleWord: true,
+    });
+    expect(addToken.constructor.name).toEqual("AddedToken");
+  });
+
+  describe("getContent", () => {
+    it("returns the string content of AddedToken", () => {
+      const addedToken = new AddedToken("test", false);
+      expect(addedToken.getContent()).toEqual("test");
+    });
+  });
+});
+
 describe("Tokenizer", () => {
   it("has expected methods", () => {
     const model = BPE.empty();
     const tokenizer = new Tokenizer(model);
+
+    expect(typeof Tokenizer.fromFile).toBe("function");
+    expect(typeof Tokenizer.fromString).toBe("function");
 
     expect(typeof tokenizer.addSpecialTokens).toBe("function");
     expect(typeof tokenizer.addTokens).toBe("function");
@@ -39,9 +77,11 @@ describe("Tokenizer", () => {
     expect(typeof tokenizer.getNormalizer).toBe("function");
     expect(typeof tokenizer.getPostProcessor).toBe("function");
     expect(typeof tokenizer.getPreTokenizer).toBe("function");
+    expect(typeof tokenizer.getVocab).toBe("function");
     expect(typeof tokenizer.getVocabSize).toBe("function");
     expect(typeof tokenizer.idToToken).toBe("function");
     expect(typeof tokenizer.runningTasks).toBe("function");
+    expect(typeof tokenizer.save).toBe("function");
     expect(typeof tokenizer.setDecoder).toBe("function");
     expect(typeof tokenizer.setModel).toBe("function");
     expect(typeof tokenizer.setNormalizer).toBe("function");
@@ -50,6 +90,7 @@ describe("Tokenizer", () => {
     expect(typeof tokenizer.setPreTokenizer).toBe("function");
     expect(typeof tokenizer.setTruncation).toBe("function");
     expect(typeof tokenizer.tokenToId).toBe("function");
+    expect(typeof tokenizer.toString).toBe("function");
     expect(typeof tokenizer.train).toBe("function");
   });
 
@@ -61,15 +102,28 @@ describe("Tokenizer", () => {
       const nbAdd = tokenizer.addTokens(["my", "name", "is", "john", "pair"]);
       expect(nbAdd).toBe(5);
     });
+
+    it("accepts a list of AddedToken as new tokens when initial model is empty", () => {
+      const model = BPE.empty();
+      const tokenizer = new Tokenizer(model);
+      const addedToken = new AddedToken("test", false);
+
+      const nbAdd = tokenizer.addTokens([addedToken]);
+      expect(nbAdd).toBe(1);
+    });
   });
 
   describe("encode", () => {
     let tokenizer: Tokenizer;
     let encode: (
-      sequence: string,
-      pair: string | null,
-      addSpecialTokens: boolean
+      sequence: InputSequence,
+      pair?: InputSequence | null,
+      options?: EncodeOptions | null
     ) => Promise<RawEncoding>;
+    let encodeBatch: (
+      inputs: EncodeInput[],
+      options?: EncodeOptions | null
+    ) => Promise<RawEncoding[]>;
 
     beforeEach(() => {
       // Clear all instances and calls to constructor and all methods:
@@ -77,28 +131,56 @@ describe("Tokenizer", () => {
 
       const model = BPE.empty();
       tokenizer = new Tokenizer(model);
-      tokenizer.addTokens(["my", "name", "is", "john", "pair"]);
+      tokenizer.addTokens(["my", "name", "is", "john", new AddedToken("pair", false)]);
+
       encode = promisify(tokenizer.encode.bind(tokenizer));
+      encodeBatch = promisify(tokenizer.encodeBatch.bind(tokenizer));
     });
 
     it("accepts a pair of strings as parameters", async () => {
-      const encoding = await encode("my name is john", "pair", false);
+      const encoding = await encode("my name is john", "pair");
       expect(encoding).toBeDefined();
     });
 
     it("accepts a string with a null pair", async () => {
-      const encoding = await encode("my name is john", null, false);
+      const encoding = await encode("my name is john", null);
       expect(encoding).toBeDefined();
     });
 
-    it("throws if called with only two arguments", async () => {
-      await expect((encode as any)("my name is john", null)).rejects.toThrow(
-        "failed downcast to boolean"
+    it("throws if we try to encode a pre-tokenized string without isPretokenized=true", async () => {
+      await expect((encode as any)(["my", "name", "is", "john"], null)).rejects.toThrow(
+        "encode with isPreTokenized=false expect string"
       );
     });
 
+    it("accepts a pre-tokenized string as parameter", async () => {
+      const encoding = await encode(["my", "name", "is", "john"], undefined, {
+        isPretokenized: true,
+      });
+      expect(encoding).toBeDefined();
+    });
+
+    it("throws if we try to encodeBatch pre-tokenized strings without isPretokenized=true", async () => {
+      await expect((encodeBatch as any)([["my", "name", "is", "john"]])).rejects.toThrow(
+        "encodeBatch with isPretokenized=false expects input to be `EncodeInput[]` " +
+          "with `EncodeInput = string | [string, string]`"
+      );
+    });
+
+    it("accepts a pre-tokenized input in encodeBatch", async () => {
+      const encoding = await encodeBatch([["my", "name", "is", "john"]], {
+        isPretokenized: true,
+      });
+      expect(encoding).toBeDefined();
+    });
+
+    it("Encodes correctly if called with only one argument", async () => {
+      const encoded = await encode("my name is john");
+      expect(encoded.getIds()).toEqual([0, 1, 2, 3]);
+    });
+
     it("returns an Encoding", async () => {
-      const encoding = await encode("my name is john", "pair", false);
+      const encoding = await encode("my name is john", "pair");
 
       expect(encoding.getAttentionMask()).toEqual([1, 1, 1, 1, 1]);
 
@@ -111,10 +193,10 @@ describe("Tokenizer", () => {
 
       expect(encoding.getOffsets()).toEqual([
         [0, 2],
-        [2, 6],
-        [6, 8],
-        [8, 12],
-        [0, 4]
+        [3, 7],
+        [8, 10],
+        [11, 15],
+        [0, 4],
       ]);
       expect(encoding.getOverflowing()).toEqual([]);
       expect(encoding.getSpecialTokensMask()).toEqual([0, 0, 0, 0, 0]);
@@ -126,16 +208,16 @@ describe("Tokenizer", () => {
       it("truncates with default if no truncation options provided", async () => {
         tokenizer.setTruncation(2);
 
-        const singleEncoding = await encode("my name is john", null, false);
+        const singleEncoding = await encode("my name is john", null);
         expect(singleEncoding.getTokens()).toEqual(["my", "name"]);
 
-        const pairEncoding = await encode("my name is john", "pair", false);
+        const pairEncoding = await encode("my name is john", "pair");
         expect(pairEncoding.getTokens()).toEqual(["my", "pair"]);
       });
 
       it("throws an error with strategy `only_second` and no pair is encoded", async () => {
         tokenizer.setTruncation(2, { strategy: TruncationStrategy.OnlySecond });
-        await expect(encode("my name is john", null, false)).rejects.toThrow();
+        await expect(encode("my name is john", null)).rejects.toThrow();
       });
     });
 
@@ -143,33 +225,43 @@ describe("Tokenizer", () => {
       it("does not pad anything with default options", async () => {
         tokenizer.setPadding();
 
-        const singleEncoding = await encode("my name", null, false);
+        const singleEncoding = await encode("my name", null);
         expect(singleEncoding.getTokens()).toEqual(["my", "name"]);
 
-        const pairEncoding = await encode("my name", "pair", false);
+        const pairEncoding = await encode("my name", "pair");
         expect(pairEncoding.getTokens()).toEqual(["my", "name", "pair"]);
       });
 
       it("pads to the right by default", async () => {
         tokenizer.setPadding({ maxLength: 5 });
 
-        const singleEncoding = await encode("my name", null, false);
+        const singleEncoding = await encode("my name", null);
         expect(singleEncoding.getTokens()).toEqual([
           "my",
           "name",
           "[PAD]",
           "[PAD]",
-          "[PAD]"
+          "[PAD]",
         ]);
 
-        const pairEncoding = await encode("my name", "pair", false);
+        const pairEncoding = await encode("my name", "pair");
         expect(pairEncoding.getTokens()).toEqual([
           "my",
           "name",
           "pair",
           "[PAD]",
-          "[PAD]"
+          "[PAD]",
         ]);
+      });
+
+      it("pads to multiple of the given value", async () => {
+        tokenizer.setPadding({ padToMultipleOf: 8 });
+
+        const singleEncoding = await encode("my name", null);
+        expect(singleEncoding.getTokens()).toHaveLength(8);
+
+        const pairEncoding = await encode("my name", "pair");
+        expect(pairEncoding.getTokens()).toHaveLength(8);
       });
     });
   });
@@ -210,8 +302,30 @@ describe("Tokenizer", () => {
       const decodeBatch = promisify(tokenizer.decodeBatch.bind(tokenizer));
       await expect(decodeBatch([[0, 1, 2, 3], [4]], true)).resolves.toEqual([
         "my name is john",
-        "pair"
+        "pair",
       ]);
+    });
+  });
+
+  describe("getVocab", () => {
+    it("accepts `undefined` as parameter", () => {
+      const model = BPE.empty();
+      const tokenizer = new Tokenizer(model);
+
+      expect(tokenizer.getVocab(undefined)).toBeDefined();
+    });
+
+    it("returns the vocabulary", () => {
+      const model = BPE.empty();
+      const tokenizer = new Tokenizer(model);
+      tokenizer.addTokens(["my", "name", "is", "john"]);
+
+      expect(tokenizer.getVocab(true)).toEqual({
+        my: 0,
+        name: 1,
+        is: 2,
+        john: 3,
+      });
     });
   });
 
@@ -233,7 +347,7 @@ describe("Tokenizer", () => {
       const expectedConfig: TruncationConfiguration = {
         maxLength: 2,
         strategy: TruncationStrategy.LongestFirst,
-        stride: 0
+        stride: 0,
       };
       expect(truncation).toEqual(expectedConfig);
     });
@@ -249,19 +363,51 @@ describe("Tokenizer", () => {
         direction: PaddingDirection.Right,
         padId: 0,
         padToken: "[PAD]",
-        padTypeId: 0
+        padTypeId: 0,
       };
       expect(padding).toEqual(expectedConfig);
     });
   });
 
-  describe("normalize", () => {
-    it("normalizes a string correctly", () => {
-      const model = BPE.empty();
-      const tokenizer = new Tokenizer(model);
-      tokenizer.setNormalizer(lowercaseNormalizer());
+  describe("postProcess", () => {
+    let tokenizer: Tokenizer;
+    let encode: (
+      sequence: InputSequence,
+      pair?: InputSequence | null,
+      options?: EncodeOptions | null
+    ) => Promise<RawEncoding>;
+    let firstEncoding: RawEncoding;
+    let secondEncoding: RawEncoding;
 
-      expect(tokenizer.normalize("MY NAME IS JOHN")).toEqual("my name is john");
+    beforeAll(() => {
+      const model = BPE.empty();
+      tokenizer = new Tokenizer(model);
+      tokenizer.addTokens(["my", "name", "is", "john", "pair"]);
+
+      encode = promisify(tokenizer.encode.bind(tokenizer));
+    });
+
+    beforeEach(async () => {
+      firstEncoding = await encode("my name is john", null);
+      secondEncoding = await encode("pair", null);
+
+      tokenizer.setTruncation(2);
+      tokenizer.setPadding({ maxLength: 5 });
+    });
+
+    it("returns correctly with a single Encoding param", () => {
+      const encoding = tokenizer.postProcess(firstEncoding);
+      expect(encoding.getTokens()).toEqual(["my", "name", "[PAD]", "[PAD]", "[PAD]"]);
+    });
+
+    it("returns correctly with `undefined` as second and third parameters", () => {
+      const encoding = tokenizer.postProcess(firstEncoding, undefined, undefined);
+      expect(encoding.getTokens()).toEqual(["my", "name", "[PAD]", "[PAD]", "[PAD]"]);
+    });
+
+    it("returns correctly with 2 encodings", () => {
+      const encoding = tokenizer.postProcess(firstEncoding, secondEncoding);
+      expect(encoding.getTokens()).toEqual(["my", "pair", "[PAD]", "[PAD]", "[PAD]"]);
     });
   });
 });

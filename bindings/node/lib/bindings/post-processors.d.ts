@@ -32,8 +32,25 @@ export function byteLevelProcessing(trimOffsets?: boolean): PostProcessor;
  *
  * @param sep A tuple with the string representation of the SEP token, and its id
  * @param cls A tuple with the string representation of the CLS token, and its id
+ * @param [trimOffsets=true] Whether to trim the whitespaces in the produced offsets
+ * @param [addPrefixSpace=true] Whether addPrefixSpace was ON during the pre-tokenization
  */
 export function robertaProcessing(
   sep: [string, number],
-  cls: [string, number]
+  cls: [string, number],
+  trimOffsets?: boolean,
+  addPrefixSpace?: boolean
+): PostProcessor;
+
+/**
+ * Instantiate a new TemplateProcessing.
+ *
+ * @param single A string describing the template for a single sequence
+ * @param pair A string describing the template for a pair of sequences
+ * @param specialTokens An array with all the special tokens
+ */
+export function templateProcessing(
+  single: string,
+  pair?: string,
+  specialTokens?: [string, number][]
 ): PostProcessor;

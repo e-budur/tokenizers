@@ -5,13 +5,13 @@ import { BPE, BPEOptions, Model } from "../../bindings/models";
 import {
   lowercaseNormalizer,
   nfkcNormalizer,
-  sequenceNormalizer
+  sequenceNormalizer,
 } from "../../bindings/normalizers";
 import { byteLevelProcessing } from "../../bindings/post-processors";
 import { byteLevelAlphabet, byteLevelPreTokenizer } from "../../bindings/pre-tokenizers";
 import { Tokenizer } from "../../bindings/tokenizer";
 import { bpeTrainer } from "../../bindings/trainers";
-import { BaseTokenizer } from "./base.tokenizer";
+import { BaseTokenizer, Token } from "./base.tokenizer";
 
 export interface ByteLevelBPETokenizerOptions {
   /**
@@ -56,7 +56,7 @@ export interface ByteLevelBPETrainOptions {
   /**
    * @default []
    */
-  specialTokens?: string[];
+  specialTokens?: Token[];
   /**
    * @default 30000
    */
@@ -72,14 +72,14 @@ type ByteLevelBPETokenizerConfig = ByteLevelBPETokenizerOptions &
 export class ByteLevelBPETokenizer extends BaseTokenizer<ByteLevelBPETokenizerConfig> {
   private static readonly defaultOptions: ByteLevelBPETokenizerConfig = {
     addPrefixSpace: false,
-    trimOffsets: false
+    trimOffsets: false,
   };
 
   private readonly defaultTrainOptions: Required<ByteLevelBPETrainOptions> = {
     minFrequency: 2,
     showProgress: true,
     specialTokens: ["<unk>"],
-    vocabSize: 30000
+    vocabSize: 30000,
   };
 
   private constructor(tokenizer: Tokenizer, configuration: ByteLevelBPETokenizerConfig) {
@@ -93,8 +93,8 @@ export class ByteLevelBPETokenizer extends BaseTokenizer<ByteLevelBPETokenizerCo
 
     let model: Model;
     if (opts.vocabFile && opts.mergesFile) {
-      const fromFiles = promisify<string, string, BPEOptions, Model>(BPE.fromFiles);
-      model = await fromFiles(opts.vocabFile, opts.mergesFile, opts);
+      const fromFile = promisify<string, string, BPEOptions, Model>(BPE.fromFile);
+      model = await fromFile(opts.vocabFile, opts.mergesFile, opts);
     } else {
       model = BPE.empty();
     }
@@ -127,7 +127,7 @@ export class ByteLevelBPETokenizer extends BaseTokenizer<ByteLevelBPETokenizerCo
     const mergedOptions = { ...this.defaultTrainOptions, ...options };
     const trainer = bpeTrainer({
       ...mergedOptions,
-      initialAlphabet: byteLevelAlphabet()
+      initialAlphabet: byteLevelAlphabet(),
     });
 
     this.tokenizer.train(trainer, files);
